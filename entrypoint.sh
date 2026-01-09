@@ -7,4 +7,4 @@ if [ -n "$PROXY_PASSWORD" ]; then
 fi
 
 # Start dante SOCKS5 proxy server
-exec danted -f /etc/danted.conf -D
+exec danted -f /etc/danted.conf 
