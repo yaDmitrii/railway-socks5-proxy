@@ -3,11 +3,11 @@ import os
 import socket
 import threading
 import logging
+import base64
+import select
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import urllib.request
 import urllib.error
-import base64
-import select
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -15,16 +15,17 @@ logger = logging.getLogger(__name__)
 PROXY_USERNAME = os.getenv('PROXY_USERNAME', 'proxyuser')
 PROXY_PASSWORD = os.getenv('PROXY_PASSWORD', 'changeme')
 PORT = int(os.getenv('PORT', '80'))
+
 class ProxyHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.handle_request()
-
+    
     def do_POST(self):
         self.handle_request()
-
+    
     def do_CONNECT(self):
         self.handle_connect()
-
+    
     def handle_connect(self):
         """Handle CONNECT method for HTTPS tunneling"""
         if not self.check_auth():
@@ -48,7 +49,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             logger.error(f'CONNECT error: {e}')
             self.send_response(500)
             self.end_headers()
-
+    
     def handle_request(self):
         """Handle HTTP request proxying"""
         if not self.check_auth():
@@ -58,13 +59,15 @@ class ProxyHandler(BaseHTTPRequestHandler):
             if self.path.startswith('http'):
                 url = self.path
             else:
-                url = f'http://{self.headers.get("Host")}{self.path}'
+                host = self.headers.get('Host')
+                url = f'http://{host}{self.path}'
             
             logger.info(f'Proxy request: {self.command} {url}')
             
-            headers = dict(self.headers)
+            headers = {k: v for k, v in self.headers.items()}
             headers.pop('Host', None)
             headers.pop('Proxy-Connection', None)
+            headers.pop('Connection', None)
             
             req = urllib.request.Request(url, headers=headers, method=self.command)
             
@@ -89,16 +92,22 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     self.wfile.write(data)
             except urllib.error.HTTPError as e:
                 self.send_response(e.code)
+                for header, value in e.headers.items():
+                    self.send_header(header, value)
+                self.end_headers()
+                try:
+                    self.wfile.write(e.read())
+                except:
+                    self.wfile.write(f'Error: {e.reason}'.encode())
+            except Exception as e:
+                logger.error(f'Request error: {e}')
+                self.send_response(500)
                 self.send_header('Content-Type', 'text/plain')
                 self.end_headers()
-                self.wfile.write(f'Error: {e.reason}'.encode())
+                self.wfile.write(f'Error: {str(e)}'.encode())
         except Exception as e:
-            logger.error(f'Request error: {e}')
-            self.send_response(500)
-            self.send_header('Content-Type', 'text/plain')
-            self.end_headers()
-            self.wfile.write(f'Error: {str(e)}'.encode())
-
+            logger.error(f'Handle request error: {e}')
+    
     def check_auth(self):
         """Check proxy authentication"""
         auth = self.headers.get('Proxy-Authorization')
@@ -109,7 +118,6 @@ class ProxyHandler(BaseHTTPRequestHandler):
             return False
         
         try:
-            import base64
             auth_type, auth_data = auth.split(' ', 1)
             if auth_type.lower() != 'basic':
                 return False
@@ -130,10 +138,9 @@ class ProxyHandler(BaseHTTPRequestHandler):
             self.send_header('Proxy-Authenticate', 'Basic realm="Proxy"')
             self.end_headers()
             return False
-
+    
     def tunnel(self, sock):
         """Tunnel data between client and server"""
-        import select
         try:
             while True:
                 readable, _, _ = select.select([self.connection, sock], [], [])
@@ -145,9 +152,6 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     other.sendall(data)
         except Exception as e:
             logger.error(f'Tunnel error: {e}')
-
-    def log_message(self, format, *args):
-        pass
 
 if __name__ == '__main__':
     server = HTTPServer(('0.0.0.0', PORT), ProxyHandler)
