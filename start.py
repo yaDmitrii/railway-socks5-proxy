@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 PROXY_USERNAME = os.getenv('PROXY_USERNAME', 'proxyuser')
 PROXY_PASSWORD = os.getenv('PROXY_PASSWORD', 'changeme')
-PORT = int(os.getenv('PORT', '1080'))
+PORT = int(os.getenv('PORT', '8080'))
 class ProxyHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.handle_request()
