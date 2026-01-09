@@ -1,8 +1,10 @@
 #!/bin/bash
 set -e
 
-# Set the password for proxyuser
-echo "proxyuser:${PROXY_PASSWORD:-changeme}" | chpasswd
+# Update password for proxyuser from Railway environment variable
+if [ -n "$PROXY_PASSWORD" ]; then
+  echo "proxyuser:$PROXY_PASSWORD" | chpasswd
+fi
 
-# Start danted
-exec danted -f /etc/danted.conf
+# Start dante SOCKS5 proxy server
+exec danted -f /etc/danted.conf -D
