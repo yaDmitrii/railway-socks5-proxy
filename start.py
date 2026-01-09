@@ -6,13 +6,15 @@ import logging
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import urllib.request
 import urllib.error
+import base64
+import select
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 PROXY_USERNAME = os.getenv('PROXY_USERNAME', 'proxyuser')
 PROXY_PASSWORD = os.getenv('PROXY_PASSWORD', 'changeme')
-PORT = int(os.getenv('PORT', '8080'))
+PORT = int(os.getenv('PORT', '80'))
 class ProxyHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.handle_request()
