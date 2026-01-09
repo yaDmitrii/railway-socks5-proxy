@@ -1,122 +1,159 @@
 #!/usr/bin/env python3
+import os
 import socket
 import threading
-import struct
-import select
 import logging
+from http.server import HTTPServer, BaseHTTPRequestHandler
+import urllib.request
+import urllib.error
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-import os
-USERNAME = os.getenv('PROXY_USERNAME', 'proxyuser').encode()
-PORT = 1080
-PASSWORD = os.getenv('PROXY_PASSWORD', 'changeme').encode()
+PROXY_USERNAME = os.getenv('PROXY_USERNAME', 'proxyuser')
+PROXY_PASSWORD = os.getenv('PROXY_PASSWORD', 'changeme')
+PORT = int(os.getenv('PORT', '8080'))
 
-def handle_socks5(client_socket, addr):
-    try:
-        # SOCKS5 greeting
-        data = client_socket.recv(1024)
-        if not data or data[0] != 5:
-            client_socket.close()
+class ProxyHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.handle_request()
+
+    def do_POST(self):
+        self.handle_request()
+
+    def do_CONNECT(self):
+        self.handle_connect()
+
+    def handle_connect(self):
+        """Handle CONNECT method for HTTPS tunneling"""
+        if not self.check_auth():
             return
         
-        nmethods = data[1]
-        # Send selection of auth method (username/password = 2)
-        client_socket.sendall(b'\x05\x02')
-        
-        # Auth phase
-        auth_data = client_socket.recv(1024)
-        if auth_data[0] == 1:  # username/password auth
-            ulen = auth_data[1]
-            username = auth_data[2:2+ulen]
-            plen = auth_data[2+ulen]
-            password = auth_data[2+ulen+1:2+ulen+1+plen]
+        try:
+            host, port = self.path.split(':')
+            port = int(port)
             
-            if username == USERNAME and password == PASSWORD:
-                client_socket.sendall(b'\x01\x00')  # Auth success
-            else:
-                client_socket.sendall(b'\x01\x01')  # Auth failure
-                client_socket.close()
-                return
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.connect((host, port))
+            
+            self.send_response(200, 'Connection established')
+            self.end_headers()
+            
+            self.connection.setblocking(False)
+            sock.setblocking(False)
+            
+            self.tunnel(sock)
+        except Exception as e:
+            logger.error(f'CONNECT error: {e}')
+            self.send_response(500)
+            self.end_headers()
+
+    def handle_request(self):
+        """Handle HTTP request proxying"""
+        if not self.check_auth():
+            return
         
-        # Connection request
-        req = client_socket.recv(1024)
-        if req[1] == 1:  # CONNECT
-            atyp = req[3]
-            if atyp == 1:  # IPv4
-                addr_bytes = req[4:8]
-                port_bytes = req[8:10]
-                target_addr = '.'.join(str(b) for b in addr_bytes)
-                target_port = struct.unpack('>H', port_bytes)[0]
-            elif atyp == 3:  # Domain
-                alen = req[4]
-                addr_bytes = req[5:5+alen]
-                port_bytes = req[5+alen:5+alen+2]
-                target_addr = addr_bytes.decode()
-                target_port = struct.unpack('>H', port_bytes)[0]
+        try:
+            if self.path.startswith('http'):
+                url = self.path
             else:
-                client_socket.sendall(b'\x05\x07\x00\x01\x00\x00\x00\x00\x00\x00')
-                client_socket.close()
-                return
+                url = f'http://{self.headers.get("Host")}{self.path}'
+            
+            logger.info(f'Proxy request: {self.command} {url}')
+            
+            headers = dict(self.headers)
+            headers.pop('Host', None)
+            headers.pop('Proxy-Connection', None)
+            
+            req = urllib.request.Request(url, headers=headers, method=self.command)
+            
+            if self.command in ['POST', 'PUT', 'PATCH']:
+                content_length = self.headers.get('Content-Length')
+                if content_length:
+                    body = self.rfile.read(int(content_length))
+                    req.data = body
             
             try:
-                server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                server.connect((target_addr, target_port))
-                logger.info(f'Connected to {target_addr}:{target_port} from {addr}')
+                response = urllib.request.urlopen(req, timeout=30)
+                self.send_response(response.code)
                 
-                # Success response
-                client_socket.sendall(b'\x05\x00\x00\x01\x00\x00\x00\x00\x00\x00')
+                for header, value in response.headers.items():
+                    self.send_header(header, value)
+                self.end_headers()
                 
-                # Relay data
-                relay(client_socket, server)
-                server.close()
-            except Exception as e:
-                logger.error(f'Connection failed: {e}')
-                client_socket.sendall(b'\x05\x05\x00\x01\x00\x00\x00\x00\x00\x00')
-                client_socket.close()
-        else:
-            client_socket.sendall(b'\x05\x07\x00\x01\x00\x00\x00\x00\x00\x00')
-            client_socket.close()
-    except Exception as e:
-        logger.error(f'Error: {e}')
-        try:
-            client_socket.close()
-        except:
-            pass
-
-def relay(client, server):
-    while True:
-        try:
-            r, _, _ = select.select([client, server], [], [])
-            for sock in r:
-                data = sock.recv(4096)
-                if not data:
-                    return
-                other = server if sock == client else client
-                other.sendall(data)
+                while True:
+                    data = response.read(4096)
+                    if not data:
+                        break
+                    self.wfile.write(data)
+            except urllib.error.HTTPError as e:
+                self.send_response(e.code)
+                self.send_header('Content-Type', 'text/plain')
+                self.end_headers()
+                self.wfile.write(f'Error: {e.reason}'.encode())
         except Exception as e:
-            logger.error(f'Relay error: {e}')
-            return
+            logger.error(f'Request error: {e}')
+            self.send_response(500)
+            self.send_header('Content-Type', 'text/plain')
+            self.end_headers()
+            self.wfile.write(f'Error: {str(e)}'.encode())
 
-def main():
-    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    server.bind(('0.0.0.0', PORT))
-    server.listen(5)
-    logger.info(f'SOCKS5 proxy listening on port {PORT}')
-    
-    try:
-        while True:
-            client, addr = server.accept()
-            logger.info(f'New connection from {addr}')
-            thread = threading.Thread(target=handle_socks5, args=(client, addr))
-            thread.daemon = True
-            thread.start()
-    except KeyboardInterrupt:
-        logger.info('Shutting down')
-    finally:
-        server.close()
+    def check_auth(self):
+        """Check proxy authentication"""
+        auth = self.headers.get('Proxy-Authorization')
+        if not auth:
+            self.send_response(407)
+            self.send_header('Proxy-Authenticate', 'Basic realm="Proxy"')
+            self.end_headers()
+            return False
+        
+        try:
+            import base64
+            auth_type, auth_data = auth.split(' ', 1)
+            if auth_type.lower() != 'basic':
+                return False
+            
+            username, password = base64.b64decode(auth_data).decode().split(':', 1)
+            if username == PROXY_USERNAME and password == PROXY_PASSWORD:
+                logger.info(f'Auth success: {username}')
+                return True
+            else:
+                logger.warning(f'Auth failed: {username}')
+                self.send_response(407)
+                self.send_header('Proxy-Authenticate', 'Basic realm="Proxy"')
+                self.end_headers()
+                return False
+        except Exception as e:
+            logger.error(f'Auth error: {e}')
+            self.send_response(407)
+            self.send_header('Proxy-Authenticate', 'Basic realm="Proxy"')
+            self.end_headers()
+            return False
+
+    def tunnel(self, sock):
+        """Tunnel data between client and server"""
+        import select
+        try:
+            while True:
+                readable, _, _ = select.select([self.connection, sock], [], [])
+                for s in readable:
+                    data = s.recv(4096)
+                    if not data:
+                        return
+                    other = sock if s == self.connection else self.connection
+                    other.sendall(data)
+        except Exception as e:
+            logger.error(f'Tunnel error: {e}')
+
+    def log_message(self, format, *args):
+        pass
 
 if __name__ == '__main__':
-    main()
+    server = HTTPServer(('0.0.0.0', PORT), ProxyHandler)
+    logger.info(f'HTTP Proxy listening on port {PORT}')
+    logger.info(f'Credentials: {PROXY_USERNAME}:{PROXY_PASSWORD}')
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        logger.info('Shutting down')
+        server.shutdown()
