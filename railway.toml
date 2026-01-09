@@ -4,5 +4,5 @@ builder = "NIXPACKS"
 [deploy]
 startCommand = "python start.py"
 [[services]]
-internalPort = 8080
+internalPort = 80
 protocol = "tcp"
