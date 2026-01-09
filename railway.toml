@@ -1,0 +1,9 @@
+[build]
+builder = "NIXPACKS"
+
+[deploy]
+startCommand = "danted -D -f /etc/danted.conf"
+
+[[services]]
+internalPort = 1080
+protocol = "tcp"
