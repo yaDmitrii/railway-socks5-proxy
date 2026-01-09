@@ -1,14 +1,16 @@
-FROM ubuntu:22.04
+FROM python:3.11-alpine
 
-RUN apt-get update && \
-    apt-get install -y dante-server && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
 
-RUN useradd -m proxyuser && \
-    echo "proxyuser:changeme" | chpasswd
+RUN apk add --no-cache bash
 
-COPY danted.conf /etc/danted.conf
+RUN pip install --no-cache-dir pysocks
+
+RUN adduser -D proxyuser && \
+    echo "proxyuser:changeme" | chpasswd 2>/dev/null || true
+
+COPY start.py .
 
 EXPOSE 1080
 
-CMD ["danted", "-f", "/etc/danted.conf"]
+CMD ["python", "start.py"]
