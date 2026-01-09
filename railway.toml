@@ -2,7 +2,7 @@
 builder = "NIXPACKS"
 
 [deploy]
-startCommand = "danted -f /etc/danted.conf"
+startCommand = "python start.py"
 [[services]]
 internalPort = 1080
 protocol = "tcp"
