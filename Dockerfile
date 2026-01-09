@@ -1,15 +1,16 @@
-FROM python:3.11-alpine
+FROM debian:12-slim
 
 WORKDIR /app
 
-# Install dante-server for SOCKS5 proxy
-RUN apk add --no-cache dante-server bash
-
-# Install Python dependencies
-RUN pip install --no-cache-dir pysocks
+# Install dante-server and other dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    dante-server \
+    bash \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
 # Create proxyuser for dante
-RUN adduser -D -s /bin/false proxyuser && \
+RUN useradd -m -s /bin/false proxyuser && \
     echo "proxyuser:changeme" | chpasswd
 
 # Copy configuration files
