@@ -2,15 +2,23 @@ FROM python:3.11-alpine
 
 WORKDIR /app
 
-RUN apk add --no-cache bash
+# Install dante-server for SOCKS5 proxy
+RUN apk add --no-cache dante-server bash
 
+# Install Python dependencies
 RUN pip install --no-cache-dir pysocks
 
-RUN adduser -D proxyuser && \
-    echo "proxyuser:changeme" | chpasswd 2>/dev/null || true
+# Create proxyuser for dante
+RUN adduser -D -s /bin/false proxyuser && \
+    echo "proxyuser:changeme" | chpasswd
 
-COPY start.py .
+# Copy configuration files
+COPY danted.conf /etc/danted.conf
+COPY entrypoint.sh /app/entrypoint.sh
 
-EXPOSE 80
+# Make entrypoint executable
+RUN chmod +x /app/entrypoint.sh
 
-CMD ["python", "start.py"]
+EXPOSE 1080
+
+ENTRYPOINT ["/app/entrypoint.sh"]
