@@ -8,9 +8,10 @@ import logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-USERNAME = b'proxyuser'
-PASSWORD = b'changeme'
+import os
+USERNAME = os.getenv('PROXY_USERNAME', 'proxyuser').encode()
 PORT = 1080
+PASSWORD = os.getenv('PROXY_PASSWORD', 'changeme').encode()
 
 def handle_socks5(client_socket, addr):
     try:
