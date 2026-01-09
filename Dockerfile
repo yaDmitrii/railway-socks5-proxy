@@ -4,12 +4,13 @@ RUN apt-get update && \
     apt-get install -y dante-server && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
-ENV PROXY_PASSWORD=changeme
+RUN useradd -m proxyuser
 
-RUN useradd -m proxyuser && echo "proxyuser:${PROXY_PASSWORD}" | chpasswd
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
 COPY danted.conf /etc/danted.conf
 
 EXPOSE 1080
 
-CMD ["danted", "-f", "/etc/danted.conf"]
+ENTRYPOINT ["/entrypoint.sh"]
