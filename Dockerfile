@@ -11,6 +11,6 @@ RUN adduser -D proxyuser && \
 
 COPY start.py .
 
-EXPOSE 1080
+EXPOSE 8080
 
 CMD ["python", "start.py"]
