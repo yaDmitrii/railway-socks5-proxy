@@ -2,7 +2,8 @@
 builder = "NIXPACKS"
 
 [deploy]
-startCommand = "python start.py"
+startCommand = "bash entrypoint.sh"
+
 [[services]]
-internalPort = 80
+internalPort = 1080
 protocol = "tcp"
